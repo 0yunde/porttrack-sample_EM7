@@ -1,0 +1,57 @@
+name: deploy-porttrack
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    strategy:
+      matrix: { env: [dev, test, stg, prd] }
+    environment: ${{ matrix.env }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install deps & test
+        run: |
+          cd app
+          npm ci
+          # run tests here if you have them
+          echo "No tests, skipping"
+
+      - name: Security scan (placeholder)
+        run: echo "Run container/lib scan here"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::<ACCOUNT_ID>:role/ga-deploy-role
+          aws-region: <REGION>
+
+      - name: Package artifact
+        run: |
+          zip -r artifact.zip . -x ".git/*" ".github/*" "app/node_modules/*"
+          shasum -a 256 artifact.zip > artifact.sha256
+
+      - name: Upload artifact to S3
+        run: |
+          aws s3 cp artifact.zip s3://porttrack-artifacts/${{ matrix.env }}/artifact-${{ github.sha }}.zip
+          aws s3 cp artifact.sha256 s3://porttrack-artifacts/${{ matrix.env }}/artifact-${{ github.sha }}.sha256
+
+      - name: Register App Revision
+        run: |
+          aws deploy register-application-revision \
+            --application-name porttrack-app \
+            --s3-location bucket=porttrack-artifacts,key=${{ matrix.env }}/artifact-${{ github.sha }}.zip,bundleType=zip
+
+      - name: Create Deployment (Rolling/In-place)
+        run: |
+          aws deploy create-deployment \
+            --application-name porttrack-app \
+            --deployment-group-name dg-${{ matrix.env }} \
+            --revision revisionType=S3Location,s3Location={bucket=porttrack-artifacts,key=${{ matrix.env }}/artifact-${{ github.sha }}.zip,bundleType=zip}

@@ -1,0 +1,9 @@
+filebeat.inputs:
+  - type: journald
+    seek: cursor
+    include_matches:
+      - "_SYSTEMD_UNIT=porttrack.service"
+
+output.logstash:
+  hosts: ["<LOGSTASH_HOST>:5044"]
+  ssl.enabled: false

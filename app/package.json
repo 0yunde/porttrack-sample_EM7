@@ -1,0 +1,17 @@
+{
+  "name": "porttrack-sample",
+  "version": "1.0.0",
+  "description": "PortTrack sample app for Module 7 - Rolling deploy with CodeDeploy",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "aws-sdk": "^2.1537.0",
+    "express": "^4.19.2",
+    "morgan": "^1.10.0",
+    "dotenv": "^16.4.5"
+  }
+}
