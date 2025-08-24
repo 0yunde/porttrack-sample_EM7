@@ -76,4 +76,4 @@ jobs:
           aws deploy create-deployment \
             --application-name "${APP_NAME}" \
             --deployment-group-name "dg-${{ matrix.env }}" \
-            --revision revisionType=S3Location,s3Location={bucket="${S3_BUCKE_
+            --revision "revisionType=S3,s3Location={bucket=${S3_BUCKET},key=${KEY_PREFIX}/${ZIP_NAME},bundleType=zip}"
