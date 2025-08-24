@@ -12,7 +12,7 @@ jobs:
       group: deploy-porttrack
       cancel-in-progress: true
     strategy:
-      matrix: { env: [dev] }
+      matrix: { env: [dev, stg, prd] }
     environment: ${{ matrix.env }}
     runs-on: ubuntu-latest
 
