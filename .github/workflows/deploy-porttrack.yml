@@ -11,7 +11,7 @@ jobs:
       contents: read
 
     concurrency:
-      group: deploy-porttrack
+      group: deploy-porttrack-${{ matrix.env }}
       cancel-in-progress: true
 
     strategy:
