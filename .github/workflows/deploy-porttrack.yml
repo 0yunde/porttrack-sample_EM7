@@ -8,7 +8,6 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    # evita despliegues concurrentes
     concurrency:
       group: deploy-porttrack
       cancel-in-progress: true
@@ -16,6 +15,14 @@ jobs:
       matrix: { env: [dev] }
     environment: ${{ matrix.env }}
     runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: us-east-1
+      APP_NAME: porttrack-app
+      S3_BUCKET: porttrack-artifacts
+      KEY_PREFIX: ${{ matrix.env }}
+      ZIP_NAME: artifact-${{ github.sha }}.zip
+      SHA_NAME: artifact-${{ github.sha }}.sha256
 
     steps:
       - uses: actions/checkout@v4
@@ -35,33 +42,38 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::885812046449:role/ga-deploy-role
-          aws-region: us-east-1
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-${{ github.run_id }}
 
-      - name: Who am I (STS)
-        run: aws sts get-caller-identity
+      - name: Debug GitHub context
+        run: |
+          echo "REPO=${GITHUB_REPOSITORY}"
+          echo "REF=${GITHUB_REF}"
+
+      - name: Ensure scripts are executable
+        run: chmod +x scripts/*.sh || true
 
       - name: Package artifact
         run: |
-          zip -r artifact.zip . \
+          zip -r "${ZIP_NAME}" . \
             -x ".git/*" ".github/*" "app/node_modules/*" \
                "**/*.env" "**/*.pem" "**/*.key" "**/id_rsa" "**/id_ed25519"
-          shasum -a 256 artifact.zip > artifact.sha256
+          shasum -a 256 "${ZIP_NAME}" > "${SHA_NAME}"
 
-      # Si tu bucket tiene policy que exige cifrado, usa --sse AES256 (recomendado)
-      - name: Upload artifact to S3
+      - name: Upload artifact to S3 (SSE-S3)
         run: |
-          aws s3 cp artifact.zip s3://porttrack-artifacts/${{ matrix.env }}/artifact-${{ github.sha }}.zip --sse AES256
-          aws s3 cp artifact.sha256 s3://porttrack-artifacts/${{ matrix.env }}/artifact-${{ github.sha }}.sha256 --sse AES256
+          aws s3 cp "${ZIP_NAME}" "s3://${S3_BUCKET}/${KEY_PREFIX}/${ZIP_NAME}" --sse AES256
+          aws s3 cp "${SHA_NAME}" "s3://${S3_BUCKET}/${KEY_PREFIX}/${SHA_NAME}" --sse AES256
 
       - name: Register App Revision
         run: |
           aws deploy register-application-revision \
-            --application-name porttrack-app \
-            --s3-location bucket=porttrack-artifacts,key=${{ matrix.env }}/artifact-${{ github.sha }}.zip,bundleType=zip
+            --application-name "${APP_NAME}" \
+            --s3-location bucket="${S3_BUCKET}",key="${KEY_PREFIX}/${ZIP_NAME}",bundleType=zip
 
-      - name: Create Deployment (Rolling/In-place)
+      - name: Create Deployment (Rolling / In-place)
         run: |
           aws deploy create-deployment \
-            --application-name porttrack-app \
-            --deployment-group-name dg-${{ matrix.env }} \
-            --revision revisionType=S3Location,s3Location={bucket=porttrack-artifacts,key=${{ matrix.env }}/artifact-${{ github.sha }}.zip,bundleType=zip}
+            --application-name "${APP_NAME}" \
+            --deployment-group-name "dg-${{ matrix.env }}" \
+            --revision revisionType=S3Location,s3Location={bucket="${S3_BUCKE_
