@@ -6,20 +6,17 @@ on:
 
 jobs:
   deploy:
-    # Permisos para OIDC + leer código
     permissions:
       id-token: write
       contents: read
 
-    # Evita superposición de ejecuciones del mismo flujo
     concurrency:
       group: deploy-porttrack
       cancel-in-progress: true
 
-    # Tres entornos: dev, stgtest y prod
     strategy:
       matrix:
-        env: [dev, stgtest, prod]
+        env: [dev]   # si quieres probar solo dev, deja [dev]
 
     environment: ${{ matrix.env }}
     runs-on: ubuntu-latest
@@ -31,9 +28,18 @@ jobs:
       KEY_PREFIX: ${{ matrix.env }}
       ZIP_NAME: artifact-${{ github.sha }}.zip
       SHA_NAME: artifact-${{ github.sha }}.sha256
+      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
 
     steps:
       - uses: actions/checkout@v4
+
+      # --- Slack: anuncio de inicio ---
+      - name: Notify Slack (start)
+        if: ${{ env.SLACK_WEBHOOK != '' }}
+        run: |
+          MSG="🚀 Inicio deploy *${{ matrix.env }}* por ${GITHUB_ACTOR} (commit ${{ github.sha }})"
+          curl -s -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"$MSG\"}" "$SLACK_WEBHOOK" >/dev/null
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -80,3 +86,19 @@ jobs:
             --application-name "${APP_NAME}" \
             --deployment-group-name "dg-${{ matrix.env }}" \
             --revision "revisionType=S3,s3Location={bucket=${S3_BUCKET},key=${KEY_PREFIX}/${ZIP_NAME},bundleType=zip}"
+
+      # --- Slack: éxito / fallo ---
+      - name: Notify Slack (success)
+        if: success() && env.SLACK_WEBHOOK != ''
+        run: |
+          MSG="✅ Deploy *${{ matrix.env }}* OK (commit ${{ github.sha }})"
+          curl -s -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"$MSG\"}" "$SLACK_WEBHOOK" >/dev/null
+
+      - name: Notify Slack (failure)
+        if: failure() && env.SLACK_WEBHOOK != ''
+        run: |
+          RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          MSG="❌ Deploy *${{ matrix.env }}* FALLÓ. Revisión: ${RUN_URL}"
+          curl -s -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"$MSG\"}" "$SLACK_WEBHOOK" >/dev/null
