@@ -6,21 +6,21 @@ on:
 
 jobs:
   deploy:
-    # OIDC + lectura del repo
+    # Permisos para OIDC + leer código
     permissions:
       id-token: write
       contents: read
 
-    # Serializa por ambiente (evita que un deploy de dev cancele prod/stg, y viceversa)
+    # Evita superposición de ejecuciones del mismo flujo
     concurrency:
-      group: deploy-porttrack-${{ matrix.env }}
+      group: deploy-porttrack
       cancel-in-progress: true
 
-    # Tres ambientes
+    # Tres entornos: dev, stgtest y prod
     strategy:
-      matrix: { env: [dev, stgtest, prod] }
+      matrix:
+        env: [dev, stgtest, prod]
 
-    # Usa Environments de GitHub para approvals/vars por ambiente (opcional)
     environment: ${{ matrix.env }}
     runs-on: ubuntu-latest
 
@@ -53,9 +53,6 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-${{ github.run_id }}
 
-      - name: Who am I (STS)
-        run: aws sts get-caller-identity
-
       - name: Ensure scripts are executable
         run: chmod +x scripts/*.sh || true
 
@@ -82,4 +79,4 @@ jobs:
           aws deploy create-deployment \
             --application-name "${APP_NAME}" \
             --deployment-group-name "dg-${{ matrix.env }}" \
-            --revision "revisionType=S3Location,s3Location={bucket=${S3_BUCKET},key=${KEY_PREFIX}/${ZIP_NAME},bundleType=zip}"
+            --revision "revisionType=S3,s3Location={bucket=${S3_BUCKET},key=${KEY_PREFIX}/${ZIP_NAME},bundleType=zip}"
