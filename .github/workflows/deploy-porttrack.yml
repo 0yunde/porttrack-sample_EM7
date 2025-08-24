@@ -10,11 +10,13 @@ jobs:
       id-token: write
       contents: read
 
+    # una cola por ambiente
     concurrency:
       group: deploy-porttrack-${{ matrix.env }}
       cancel-in-progress: true
 
     strategy:
+      fail-fast: false
       matrix:
         env: [dev, stgtest, prod]
 
@@ -40,7 +42,7 @@ jobs:
       - name: Install deps & (skip) tests
         working-directory: app
         run: |
-          npm install
+          npm ci --no-audit --no-fund || npm install
           echo "No tests, skipping"
 
       - name: Configure AWS credentials (OIDC)
@@ -53,26 +55,24 @@ jobs:
       # ---- Slack: INICIO ----
       - name: Slack | Inicio deploy
         if: always()
+        continue-on-error: true
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           SHORT_SHA=${GITHUB_SHA::7}
-          read -r -d '' payload <<EOF
-          {
-            "text": ":rocket: *Inicio deploy* \`${{ matrix.env }}\` por *${GITHUB_ACTOR}*",
-            "attachments": [
-              {
-                "color": "#439FE0",
-                "fields": [
-                  {"title":"Repo","value":"${GITHUB_REPOSITORY}","short":true},
-                  {"title":"Commit","value":"${SHORT_SHA}","short":true}
-                ]
-              }
-            ]
-          }
-          EOF
-          curl -s -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL" >/dev/null
-      # ---- Slack: INICIO ----
+          payload=$(jq -n \
+            --arg env "${{ matrix.env }}" \
+            --arg actor "${GITHUB_ACTOR}" \
+            --arg repo "${GITHUB_REPOSITORY}" \
+            --arg sha "$SHORT_SHA" \
+            '{text: ":rocket: *Inicio deploy* `\($env)` por *\($actor)*",
+              attachments:[{color:"#439FE0",
+                fields:[
+                  {title:"Repo",value:$repo,short:true},
+                  {title:"Commit",value:$sha,short:true}
+                ]}]}')
+          curl -fsS -X POST -H 'Content-type: application/json' \
+            --data "$payload" "$SLACK_WEBHOOK_URL" >/dev/null
 
       - name: Ensure scripts are executable
         run: chmod +x scripts/*.sh || true
@@ -105,64 +105,56 @@ jobs:
             --query deploymentId --output text)
           echo "DEPLOY_ID=$DEPLOY_ID" >> $GITHUB_OUTPUT
           echo "DEPLOY_URL=https://${AWS_REGION}.console.aws.amazon.com/codesuite/codedeploy/deployments/${DEPLOY_ID}?region=${AWS_REGION}" >> $GITHUB_OUTPUT
+          echo "Deployment creado: $DEPLOY_ID" >> $GITHUB_STEP_SUMMARY
 
       # ---- Slack: DEPLOYMENT CREADO ----
       - name: Slack | Deployment creado
-        if: success()
+        if: always()
+        continue-on-error: true
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           SHORT_SHA=${GITHUB_SHA::7}
           DEPLOY_URL="${{ steps.create_deploy.outputs.DEPLOY_URL }}"
-          read -r -d '' payload <<EOF
-          {
-            "text": ":package: *Deployment creado* \`${{ matrix.env }}\`",
-            "attachments": [
-              {
-                "color":"#439FE0",
-                "fields":[
-                  {"title":"Deployment","value":"<${DEPLOY_URL}|Ver en CodeDeploy>","short":true},
-                  {"title":"Commit","value":"${SHORT_SHA}","short":true}
-                ]
-              }
-            ]
-          }
-          EOF
-          curl -s -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL" >/dev/null
-      # ---- Slack: DEPLOYMENT CREADO ----
+          payload=$(jq -n \
+            --arg env "${{ matrix.env }}" \
+            --arg url "$DEPLOY_URL" \
+            --arg sha "$SHORT_SHA" \
+            '{text: ":package: *Deployment creado* `\($env)`",
+              attachments:[{color:"#439FE0",
+                fields:[
+                  {title:"Deployment",value:"<\($url)|Ver en CodeDeploy>",short:true},
+                  {title:"Commit",value:$sha,short:true}
+                ]}]}')
+          curl -fsS -X POST -H 'Content-type: application/json' \
+            --data "$payload" "$SLACK_WEBHOOK_URL" >/dev/null
 
-      # (A partir de aquí CodeDeploy se encarga del rolling / validación)
+      # (CodeDeploy hace el rolling y validación en la/las EC2)
 
       # ---- Slack: ÉXITO ----
       - name: Slack | Éxito
         if: success()
+        continue-on-error: true
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           SHORT_SHA=${GITHUB_SHA::7}
-          read -r -d '' payload <<EOF
-          {
-            "text": ":white_check_mark: *Deploy OK* \`${{ matrix.env }}\` (commit ${SHORT_SHA})"
-          }
-          EOF
-          curl -s -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL" >/dev/null
-      # ---- Slack: ÉXITO ----
+          payload=$(jq -n --arg env "${{ matrix.env }}" --arg sha "$SHORT_SHA" \
+            '{text: ":white_check_mark: *Deploy OK* `\($env)` (commit \($sha))"}')
+          curl -fsS -X POST -H 'Content-type: application/json' \
+            --data "$payload" "$SLACK_WEBHOOK_URL" >/dev/null
 
       # ---- Slack: ERROR ----
       - name: Slack | Error
         if: failure()
+        continue-on-error: true
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           SHORT_SHA=${GITHUB_SHA::7}
           JOB_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          read -r -d '' payload <<EOF
-          {
-            "text": ":x: *Deploy FALLÓ* \`${{ matrix.env }}\` (commit ${SHORT_SHA})",
-            "attachments":[
-              {"color":"#E01E5A","text":"<${JOB_URL}|Ver logs del workflow>"}
-            ]
-          }
-          EOF
-          curl -s -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL" >/dev/null
-      # ---- Slack: ERROR ----
+          payload=$(jq -n --arg env "${{ matrix.env }}" --arg sha "$SHORT_SHA" --arg url "$JOB_URL" \
+            '{text: ":x: *Deploy FALLÓ* `\($env)` (commit \($sha))",
+              attachments:[{color:"#E01E5A",text:"<\($url)|Ver logs del workflow>"}]}')
+          curl -fsS -X POST -H 'Content-type: application/json' \
+            --data "$payload" "$SLACK_WEBHOOK_URL" >/dev/null
