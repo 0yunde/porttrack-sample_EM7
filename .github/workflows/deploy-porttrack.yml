@@ -16,7 +16,7 @@ jobs:
 
     strategy:
       matrix:
-        env: [dev]   # si quieres probar solo dev, deja [dev]
+        env: [dev, stgtest, prod]
 
     environment: ${{ matrix.env }}
     runs-on: ubuntu-latest
@@ -28,18 +28,9 @@ jobs:
       KEY_PREFIX: ${{ matrix.env }}
       ZIP_NAME: artifact-${{ github.sha }}.zip
       SHA_NAME: artifact-${{ github.sha }}.sha256
-      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
 
     steps:
       - uses: actions/checkout@v4
-
-      # --- Slack: anuncio de inicio ---
-      - name: Notify Slack (start)
-        if: ${{ env.SLACK_WEBHOOK != '' }}
-        run: |
-          MSG="🚀 Inicio deploy *${{ matrix.env }}* por ${GITHUB_ACTOR} (commit ${{ github.sha }})"
-          curl -s -X POST -H 'Content-type: application/json' \
-            --data "{\"text\":\"$MSG\"}" "$SLACK_WEBHOOK" >/dev/null
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -58,6 +49,30 @@ jobs:
           role-to-assume: arn:aws:iam::885812046449:role/ga-deploy-role
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-${{ github.run_id }}
+
+      # ---- Slack: INICIO ----
+      - name: Slack | Inicio deploy
+        if: always()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          SHORT_SHA=${GITHUB_SHA::7}
+          read -r -d '' payload <<EOF
+          {
+            "text": ":rocket: *Inicio deploy* \`${{ matrix.env }}\` por *${GITHUB_ACTOR}*",
+            "attachments": [
+              {
+                "color": "#439FE0",
+                "fields": [
+                  {"title":"Repo","value":"${GITHUB_REPOSITORY}","short":true},
+                  {"title":"Commit","value":"${SHORT_SHA}","short":true}
+                ]
+              }
+            ]
+          }
+          EOF
+          curl -s -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL" >/dev/null
+      # ---- Slack: INICIO ----
 
       - name: Ensure scripts are executable
         run: chmod +x scripts/*.sh || true
@@ -80,25 +95,74 @@ jobs:
             --application-name "${APP_NAME}" \
             --s3-location bucket="${S3_BUCKET}",key="${KEY_PREFIX}/${ZIP_NAME}",bundleType=zip
 
-      - name: Create Deployment (Rolling / In-place)
+      - id: create_deploy
+        name: Create Deployment (Rolling / In-place)
         run: |
-          aws deploy create-deployment \
+          DEPLOY_ID=$(aws deploy create-deployment \
             --application-name "${APP_NAME}" \
             --deployment-group-name "dg-${{ matrix.env }}" \
-            --revision "revisionType=S3,s3Location={bucket=${S3_BUCKET},key=${KEY_PREFIX}/${ZIP_NAME},bundleType=zip}"
+            --revision "revisionType=S3,s3Location={bucket=${S3_BUCKET},key=${KEY_PREFIX}/${ZIP_NAME},bundleType=zip}" \
+            --query deploymentId --output text)
+          echo "DEPLOY_ID=$DEPLOY_ID" >> $GITHUB_OUTPUT
+          echo "DEPLOY_URL=https://${AWS_REGION}.console.aws.amazon.com/codesuite/codedeploy/deployments/${DEPLOY_ID}?region=${AWS_REGION}" >> $GITHUB_OUTPUT
 
-      # --- Slack: éxito / fallo ---
-      - name: Notify Slack (success)
-        if: success() && env.SLACK_WEBHOOK != ''
+      # ---- Slack: DEPLOYMENT CREADO ----
+      - name: Slack | Deployment creado
+        if: success()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
-          MSG="✅ Deploy *${{ matrix.env }}* OK (commit ${{ github.sha }})"
-          curl -s -X POST -H 'Content-type: application/json' \
-            --data "{\"text\":\"$MSG\"}" "$SLACK_WEBHOOK" >/dev/null
+          SHORT_SHA=${GITHUB_SHA::7}
+          DEPLOY_URL="${{ steps.create_deploy.outputs.DEPLOY_URL }}"
+          read -r -d '' payload <<EOF
+          {
+            "text": ":package: *Deployment creado* \`${{ matrix.env }}\`",
+            "attachments": [
+              {
+                "color":"#439FE0",
+                "fields":[
+                  {"title":"Deployment","value":"<${DEPLOY_URL}|Ver en CodeDeploy>","short":true},
+                  {"title":"Commit","value":"${SHORT_SHA}","short":true}
+                ]
+              }
+            ]
+          }
+          EOF
+          curl -s -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL" >/dev/null
+      # ---- Slack: DEPLOYMENT CREADO ----
 
-      - name: Notify Slack (failure)
-        if: failure() && env.SLACK_WEBHOOK != ''
+      # (A partir de aquí CodeDeploy se encarga del rolling / validación)
+
+      # ---- Slack: ÉXITO ----
+      - name: Slack | Éxito
+        if: success()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
-          RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          MSG="❌ Deploy *${{ matrix.env }}* FALLÓ. Revisión: ${RUN_URL}"
-          curl -s -X POST -H 'Content-type: application/json' \
-            --data "{\"text\":\"$MSG\"}" "$SLACK_WEBHOOK" >/dev/null
+          SHORT_SHA=${GITHUB_SHA::7}
+          read -r -d '' payload <<EOF
+          {
+            "text": ":white_check_mark: *Deploy OK* \`${{ matrix.env }}\` (commit ${SHORT_SHA})"
+          }
+          EOF
+          curl -s -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL" >/dev/null
+      # ---- Slack: ÉXITO ----
+
+      # ---- Slack: ERROR ----
+      - name: Slack | Error
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          SHORT_SHA=${GITHUB_SHA::7}
+          JOB_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          read -r -d '' payload <<EOF
+          {
+            "text": ":x: *Deploy FALLÓ* \`${{ matrix.env }}\` (commit ${SHORT_SHA})",
+            "attachments":[
+              {"color":"#E01E5A","text":"<${JOB_URL}|Ver logs del workflow>"}
+            ]
+          }
+          EOF
+          curl -s -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL" >/dev/null
+      # ---- Slack: ERROR ----
