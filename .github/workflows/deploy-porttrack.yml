@@ -5,10 +5,18 @@ on:
 
 jobs:
   deploy:
+    permissions:
+      id-token: write
+      contents: read
+    # evita despliegues concurrentes
+    concurrency:
+      group: deploy-porttrack
+      cancel-in-progress: true
     strategy:
-      matrix: { env: [dev, test, stg, prd] }
+      matrix: { env: [dev] }
     environment: ${{ matrix.env }}
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -17,31 +25,33 @@ jobs:
         with:
           node-version: 18
 
-      - name: Install deps & test
+      - name: Install deps & (skip) tests
+        working-directory: app
         run: |
-          cd app
-          npm ci
-          # run tests here if you have them
+          npm install
           echo "No tests, skipping"
-
-      - name: Security scan (placeholder)
-        run: echo "Run container/lib scan here"
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::<ACCOUNT_ID>:role/ga-deploy-role
-          aws-region: <REGION>
+          role-to-assume: arn:aws:iam::885812046449:role/ga-deploy-role
+          aws-region: us-east-1
+
+      - name: Who am I (STS)
+        run: aws sts get-caller-identity
 
       - name: Package artifact
         run: |
-          zip -r artifact.zip . -x ".git/*" ".github/*" "app/node_modules/*"
+          zip -r artifact.zip . \
+            -x ".git/*" ".github/*" "app/node_modules/*" \
+               "**/*.env" "**/*.pem" "**/*.key" "**/id_rsa" "**/id_ed25519"
           shasum -a 256 artifact.zip > artifact.sha256
 
+      # Si tu bucket tiene policy que exige cifrado, usa --sse AES256 (recomendado)
       - name: Upload artifact to S3
         run: |
-          aws s3 cp artifact.zip s3://porttrack-artifacts/${{ matrix.env }}/artifact-${{ github.sha }}.zip
-          aws s3 cp artifact.sha256 s3://porttrack-artifacts/${{ matrix.env }}/artifact-${{ github.sha }}.sha256
+          aws s3 cp artifact.zip s3://porttrack-artifacts/${{ matrix.env }}/artifact-${{ github.sha }}.zip --sse AES256
+          aws s3 cp artifact.sha256 s3://porttrack-artifacts/${{ matrix.env }}/artifact-${{ github.sha }}.sha256 --sse AES256
 
       - name: Register App Revision
         run: |
