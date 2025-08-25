@@ -1,0 +1,99 @@
+{
+	"info": {
+		"_postman_id": "956f27e5-2b76-4547-b113-be6c358de546",
+		"name": "Docker ELK",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "39633999",
+		"_collection_link": "https://my-team-9716.postman.co/workspace/SalesforceCollection~490988fc-2a27-476c-9cf3-6f0fb625b512/collection/39633999-956f27e5-2b76-4547-b113-be6c358de546?action=share&source=collection_link&creator=39633999"
+	},
+	"item": [
+		{
+			"name": "Mappings",
+			"item": [
+				{
+					"name": "Get Movies Mapping",
+					"request": {
+						"method": "GET",
+						"header": []
+					},
+					"response": []
+				},
+				{
+					"name": "Insert Movies Mapping",
+					"request": {
+						"method": "PUT",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"mappings\": {\n        \"properties\": {\n            \"Title\": {\n                \"type\": \"text\",\n                \"fields\": {\n                    \"keyword\": {\n                    \"type\": \"keyword\"\n                    }\n                }\n            },\n            \"Year\": { \"type\": \"integer\" },\n            \"Rated\": { \"type\": \"keyword\" },\n            \"Released\": { \"type\": \"date\", \"format\": \"dd MMM yyyy\" },\n            \"Runtime\": { \"type\": \"keyword\" },\n            \"Genre\": { \"type\": \"text\" },\n            \"Director\": { \"type\": \"text\" },\n            \"Writer\": { \"type\": \"text\" },\n            \"Actors\": { \"type\": \"text\" },\n            \"Language\": { \"type\": \"text\" },\n            \"Country\": { \"type\": \"text\" },\n            \"Awards\": { \"type\": \"text\" },\n            \"imdbRating\": { \"type\": \"float\" },\n            \"imdbID\": { \"type\": \"keyword\" },\n            \"Type\": { \"type\": \"keyword\" }\n        }\n    }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}:9200/movies",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"port": "9200",
+							"path": [
+								"movies"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Data",
+			"item": []
+		}
+	],
+	"auth": {
+		"type": "basic",
+		"basic": [
+			{
+				"key": "password",
+				"value": "changeme",
+				"type": "string"
+			},
+			{
+				"key": "username",
+				"value": "elastic",
+				"type": "string"
+			}
+		]
+	},
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "localhost",
+			"type": "string"
+		}
+	]
+}
